@@ -72,7 +72,7 @@ def calculate_option_price_custom(S0, K, T, r, sigma, option_type):
 
 def calculate_greeks(S0, K, T, r, sigma, option_type):
     """
-    Calculates option Greeks using the finite difference method.
+    Calculates option Greeks using the finite difference method and returns intermediate values.
     """
     dS = S0 * 0.01
     dSigma = 0.01
@@ -92,7 +92,18 @@ def calculate_greeks(S0, K, T, r, sigma, option_type):
     theta = (price_minus_T - base_price) / dT
     rho = (price_plus_r - base_price) / (dR * 100)
     
-    return delta, gamma, vega, theta, rho
+    # Bundle intermediate values for returning
+    calculation_details = {
+        "dS": dS,
+        "base_price": base_price,
+        "price_plus_S": price_plus_S,
+        "price_minus_S": price_minus_S,
+        "price_plus_sigma": price_plus_sigma,
+        "price_minus_T": price_minus_T,
+        "price_plus_r": price_plus_r
+    }
+    
+    return delta, gamma, vega, theta, rho, calculation_details
 
 # --- STREAMLIT USER INTERFACE ---
 st.set_page_config(layout="wide")
@@ -135,23 +146,19 @@ if ticker_input:
             option_type = st.selectbox("Option Type", ('Call', 'Put'))
 
         with sub_col2:
-            # --- CHANGE: Input for number of days instead of selecting a date ---
             days_to_expiry = st.number_input(
                 "Days to Expiration", 
                 min_value=1, 
-                max_value=730,  # Max of ~2 years
+                max_value=730,
                 value=30, 
                 step=1,
                 help="Enter the number of days until the option expires."
             )
 
-        # Calculate Time to Expiration (T) directly from the number of days
         T = days_to_expiry / 365.0
 
         with sub_col3:
-            # --- CHANGE: Manual number input for Strike Price ---
-            # Set a sensible default value close to the current stock price
-            default_strike = round(S0 / 5) * 5 # Round to nearest 5
+            default_strike = round(S0 / 5) * 5
             K = st.number_input(
                 "Strike Price (K)", 
                 min_value=0.0,
@@ -169,8 +176,8 @@ if ticker_input:
 
         st.metric(label=f"Calculated {option_type} Option Price", value=f"₹{option_price:,.4f}")
 
-        delta, gamma, vega, theta, rho = calculate_greeks(S0, K, T, r, sigma, option_type)
-        st.subheader("Option Greeks (Estimates)")
+        delta, gamma, vega, theta, rho, calculation_details = calculate_greeks(S0, K, T, r, sigma, option_type)
+        st.subheader("Option Greeks (Calculated)")
         
         greek_col1, greek_col2, greek_col3, greek_col4, greek_col5 = st.columns(5)
         greek_col1.metric("Delta", f"{delta:.4f}")
@@ -178,6 +185,50 @@ if ticker_input:
         greek_col3.metric("Vega", f"{vega:.4f}")
         greek_col4.metric("Theta", f"{theta:.4f}")
         greek_col5.metric("Rho", f"{rho:.4f}")
+
+        # --- NEW: Expander for showing Greek calculation details ---
+        with st.expander("Show Greek Calculation Details"):
+            details = calculation_details
+            st.write("The Greeks are calculated using the finite difference method, which involves re-pricing the option with small changes to its inputs.")
+            
+            st.markdown("---")
+            st.subheader("Delta (Δ)")
+            st.latex(r"\Delta = \frac{C(S_0 + dS) - C(S_0 - dS)}{2 \cdot dS}")
+            st.write(f"Price with increased Stock (S + dS): `₹{details['price_plus_S']:.4f}`")
+            st.write(f"Price with decreased Stock (S - dS): `₹{details['price_minus_S']:.4f}`")
+            st.write(f"Change in Stock (dS): `₹{details['dS']:.4f}`")
+            st.write(f"**Calculation:** `({details['price_plus_S']:.4f} - {details['price_minus_S']:.4f}) / (2 * {details['dS']:.4f}) = {delta:.4f}`")
+
+            st.markdown("---")
+            st.subheader("Gamma (Γ)")
+            st.latex(r"\Gamma = \frac{C(S_0 + dS) - 2C(S_0) + C(S_0 - dS)}{(dS)^2}")
+            st.write(f"Base Price: `₹{details['base_price']:.4f}`")
+            st.write(f"Price with increased Stock (S + dS): `₹{details['price_plus_S']:.4f}`")
+            st.write(f"Price with decreased Stock (S - dS): `₹{details['price_minus_S']:.4f}`")
+            st.write(f"Change in Stock (dS): `₹{details['dS']:.4f}`")
+            st.write(f"**Calculation:** `({details['price_plus_S']:.4f} - 2 * {details['base_price']:.4f} + {details['price_minus_S']:.4f}) / ({details['dS']:.4f}²) = {gamma:.4f}`")
+
+            st.markdown("---")
+            st.subheader("Vega")
+            st.latex(r"Vega = \frac{C(\sigma + d\sigma) - C(\sigma)}{100 \cdot d\sigma}")
+            st.write(f"Base Price: `₹{details['base_price']:.4f}`")
+            st.write(f"Price with increased Volatility (σ + dσ): `₹{details['price_plus_sigma']:.4f}`")
+            st.write(f"**Calculation:** `({details['price_plus_sigma']:.4f} - {details['base_price']:.4f}) / (100 * 0.01) = {vega:.4f}`")
+            
+            st.markdown("---")
+            st.subheader("Theta (Θ)")
+            st.latex(r"\Theta = \frac{C(T - dT) - C(T)}{dT}")
+            st.write(f"Base Price: `₹{details['base_price']:.4f}`")
+            st.write(f"Price with decreased Time (T - dT): `₹{details['price_minus_T']:.4f}`")
+            st.write(f"Change in Time (dT): `1/365`")
+            st.write(f"**Calculation:** `({details['price_minus_T']:.4f} - {details['base_price']:.4f}) / (1/365) = {theta:.4f}`")
+
+            st.markdown("---")
+            st.subheader("Rho (ρ)")
+            st.latex(r"Rho = \frac{C(r + dr) - C(r)}{100 \cdot dr}")
+            st.write(f"Base Price: `₹{details['base_price']:.4f}`")
+            st.write(f"Price with increased Rate (r + dr): `₹{details['price_plus_r']:.4f}`")
+            st.write(f"**Calculation:** `({details['price_plus_r']:.4f} - {details['base_price']:.4f}) / (100 * 0.01) = {rho:.4f}`")
 
         st.divider()
 
